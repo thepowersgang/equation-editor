@@ -1,25 +1,33 @@
 
+//!
+//! Expression type
+//!
+
 #[derive(Debug,PartialEq,Eq,Copy,Clone)]
 pub enum Op
 {
 	Equality,
-	Add,	// Note: Subtract is handled with `negated`
-	Multiply,
-	Divide,
-	Exponent,
+	AddSub,	// Note: Subtract is handled with `negated`
+	MulDiv,
+	ExpRoot,	// NOTE: Root doesn't actually exist
 }
 #[derive(Debug,Clone)]
 pub enum Expression
 {
+	/// Negate the inner value
+	Negative(Box<Expression>),
+	/// Group of like operators
 	SubNode(ExprNode),
+	/// Literal value
 	Literal(f32),
+	/// Variable name
 	Variable(String),
 }
 #[derive(Debug,Clone)]
 pub struct SubExpression
 {
-	// TODO: Use this same flag for / instead of *
-	pub negated: bool,
+	/// Indicates subtract/divide instead of add/multiply
+	pub inverse: bool,
 	pub val: Expression,
 }
 
@@ -29,6 +37,11 @@ pub struct ExprNode
 {
 	pub operation: Op,
 	pub values: Vec<SubExpression>,
+}
+#[derive(Debug)]
+pub enum ParseError {
+	Unexpected(String),
+	BadToken(String),
 }
 
 #[derive(PartialEq,PartialOrd,Eq,Ord)]
@@ -48,10 +61,9 @@ impl Precedence
 		match op
 		{
 		Op::Equality => Precedence::Equality,
-		Op::Add => Precedence::AddSub,
-		Op::Multiply => Precedence::Mul,
-		Op::Divide => Precedence::Div,
-		Op::Exponent => Precedence::Exp,
+		Op::AddSub => Precedence::AddSub,
+		Op::MulDiv => Precedence::Mul,
+		Op::ExpRoot => Precedence::Exp,
 		}
 	}
 	fn of_expr(e: &Expression) -> Precedence
@@ -72,10 +84,10 @@ impl Expression {
 
 impl std::str::FromStr for Expression
 {
-	type Err = String;
-	fn from_str(s: &str) -> Result<Expression, String> {
-		let mut l = Lexer::new(s);
-		Self::parse_root(&mut l).map_err(|e| format!("{:?}", e))
+	type Err = ParseError;
+	fn from_str(s: &str) -> Result<Expression, ParseError> {
+		let mut l = Lexer::new(s)?;
+		Self::parse_root(&mut l)
 	}
 }
 impl std::fmt::Display for Expression
@@ -83,6 +95,13 @@ impl std::fmt::Display for Expression
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self
 		{
+		Expression::Negative(sn) =>
+			match **sn
+			{
+			Expression::Literal(_) => write!(f, "-{}", sn),
+			Expression::Variable(_) => write!(f, "-{}", sn),
+			_ => write!(f, "-({})", sn),
+			},
 		Expression::SubNode(sn) => std::fmt::Display::fmt(sn, f),
 		Expression::Literal(v) => std::fmt::Display::fmt(&v, f),
 		Expression::Variable(n) => std::fmt::Display::fmt(&n[..], f),
@@ -94,7 +113,6 @@ impl std::fmt::Display for ExprNode
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		use std::fmt::Write;
 		assert!(self.values.len() > 1);
-		let mut it = self.values.iter();
 
 		let emit_with_parens = |v: &Expression, f: &mut std::fmt::Formatter| {
 			let needs_parens = v.needs_parens(self.operation);
@@ -108,30 +126,28 @@ impl std::fmt::Display for ExprNode
 			Ok( () )
 			};
 
+		for (i,v) in self.values.iter().enumerate()
 		{
-			let v0 = it.next().unwrap();
-			if v0.negated {
-				f.write_char('-')?;
+			if i == 0 {
 			}
-			emit_with_parens(&v0.val, f)?;
-		}
-		for v in it
-		{
-			match self.operation
-			{
-			Op::Add => if v.negated {
-					f.write_char('-')?;
+			else {
+				match self.operation
+				{
+				Op::AddSub => if v.inverse {
+						f.write_char('-')?;
+					}
+					else {
+						f.write_char('+')?;
+					},
+				Op::MulDiv => if v.inverse {
+						f.write_char('/')?;
+					}
+					else {
+						f.write_char('*')?;
+					},
+				Op::ExpRoot => { assert!(!v.inverse); f.write_char('^')? },
+				Op::Equality => f.write_char('=')?,
 				}
-				else {
-					f.write_char('+')?;
-				},
-			Op::Multiply => f.write_char('*')?,
-			Op::Divide => f.write_char('/')?,
-			Op::Exponent => f.write_char('^')?,
-			Op::Equality => f.write_char('=')?,
-			}
-			if v.negated && self.operation != Op::Add {
-				f.write_char('-')?;
 			}
 			emit_with_parens(&v.val, f)?;
 		}
@@ -139,16 +155,11 @@ impl std::fmt::Display for ExprNode
 	}
 }
 
-#[derive(Debug)]
-enum ParseError {
-	Unexpected(String),
-}
 #[derive(Debug,Copy,Clone,PartialEq)]
 enum Token<'a> {
 	Eof,
 	Whitespace,
 	Comment(&'a str),
-	UnexpectedCharacter(char),
 	Ident(&'a str),
 	Literal(f32),
 	Op(char),
@@ -156,27 +167,27 @@ enum Token<'a> {
 	ParenClose,
 }
 ::plex::lexer! {
-	fn lex_next_token(text: 'a) -> Token<'a>;
+	fn lex_next_token(text: 'a) -> Result<Token<'a>, ParseError>;
 
-	r#"[ \t\r\n]+"# => Token::Whitespace,
-	r#"#.*"# => Token::Comment(text),
+	r#"[ \t\r\n]+"# => Ok(Token::Whitespace),
+	r#"#.*"# => Ok(Token::Comment(text)),
 	r#"[0-9]+(\.[0-9]*)?"# =>
             if let Ok(i) = text.parse() {
-                Token::Literal(i)
+                Ok(Token::Literal(i))
             } else {
-                panic!("integer {} is out of range", text)
+				Err(ParseError::BadToken(text.to_owned()))
             },
-	r#"[a-zA-Z][a-zA-Z0-9_']*"# => Token::Ident(text),
-	r#"\+"# => Token::Op('+'),
-	r#"-"#  => Token::Op('-'),
-	r#"\*"# => Token::Op('*'),
-	r#"/"#  => Token::Op('/'),
-	r#"\^"# => Token::Op('^'),
-	r#"="#  => Token::Op('='),
+	r#"[a-zA-Z][a-zA-Z0-9_']*"# => Ok(Token::Ident(text)),
+	r#"\+"# => Ok(Token::Op('+')),
+	r#"-"#  => Ok(Token::Op('-')),
+	r#"\*"# => Ok(Token::Op('*')),
+	r#"/"#  => Ok(Token::Op('/')),
+	r#"\^"# => Ok(Token::Op('^')),
+	r#"="#  => Ok(Token::Op('=')),
 
-	r#"\("# => Token::ParenOpen,
-	r#"\)"# => Token::ParenClose,
-	r"." => Token::UnexpectedCharacter(text.chars().next().unwrap()),
+	r#"\("# => Ok(Token::ParenOpen),
+	r#"\)"# => Ok(Token::ParenClose),
+	r"." => Err(ParseError::BadToken(text.to_owned())),
 }
 struct Lexer<'a>
 {
@@ -186,22 +197,22 @@ struct Lexer<'a>
 }
 impl<'a> Lexer<'a>
 {
-	fn new(s: &'a str) -> Lexer {
+	fn new(s: &'a str) -> Result<Lexer<'a>, ParseError> {
 		let mut rv = Lexer {
 			//base: s,
 			remaining: s,
 			cur_token: Token::Eof,
 			};
-		rv.consume();
-		rv
+		rv.consume()?;
+		Ok(rv)
 	}
-	pub fn consume(&mut self) -> Token<'a> {
+	pub fn consume(&mut self) -> Result<Token<'a>, ParseError> {
 		let mut t;
 		loop
 		{
-			t = if let Some( (tok, new_rem) ) = lex_next_token(self.remaining) {
+			t = if let Some((tok_res, new_rem)) = lex_next_token(self.remaining) {
 					self.remaining = new_rem;
-					tok
+					tok_res?
 				}
 				else {
 					Token::Eof
@@ -214,19 +225,19 @@ impl<'a> Lexer<'a>
 			}
 			break;
 		}
-		::std::mem::replace(&mut self.cur_token, t)
+		Ok( ::std::mem::replace(&mut self.cur_token, t) )
 	}
 	pub fn cur(&self) -> Token<'a> {
 		self.cur_token
 	}
-	pub fn consume_if(&mut self, t: Token<'_>) -> bool {
-		if self.cur_token == t {
-			self.consume();
+	pub fn consume_if(&mut self, t: Token<'_>) -> Result<bool,ParseError> {
+		Ok(if self.cur_token == t {
+			self.consume()?;
 			true
 		}
 		else {
 			false
-		}
+		})
 	}
 }
 
@@ -239,9 +250,9 @@ impl Expression
 		let v = Self::parse_1(lexer)?;
 	
 		if let Token::Op('=') = lexer.cur() {
-			let mut values = vec![v];
-			while lexer.consume_if( Token::Op('=') ) {
-				values.push( Self::parse_1(lexer)? );
+			let mut values = vec![SubExpression { inverse: false, val: v }];
+			while lexer.consume_if( Token::Op('=') )? {
+				values.push(SubExpression { inverse: false, val: Self::parse_1(lexer)? });
 			}
 			Ok(Expression::SubNode(ExprNode {
 				operation: Op::Equality,
@@ -249,134 +260,142 @@ impl Expression
 				}))
 		}
 		else {
-			assert!( !v.negated );
-			Ok(v.val)
+			Ok(v)
 		}
 	}
 	// Add/Subtract
-	fn parse_1(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
+	fn parse_1(lexer: &mut Lexer) -> Result<Expression,ParseError> {
 		let mut v = Self::parse_2(lexer)?;
 		let mut values = vec![];
+		let mut is_neg = false;
 
 		loop
 		{
-			let is_neg = if lexer.consume_if(Token::Op('-')) {
+			let new_is_neg = if lexer.consume_if(Token::Op('-'))? {
 					true
 				}
-				else if lexer.consume_if(Token::Op('+')) {
+				else if lexer.consume_if(Token::Op('+'))? {
 					false
 				}
 				else {
 					break;
 				};
-			values.push(v);
+			values.push(SubExpression { inverse: is_neg, val: v });
+			is_neg = new_is_neg;
 			v = Self::parse_2(lexer)?;
-			v.negated ^= is_neg;
 		}
 		if values.len() > 0
 		{
-			values.push(v);
-			Ok(SubExpression { negated: false, val: Expression::SubNode(ExprNode {
-				operation: Op::Add,
+			values.push(SubExpression { inverse: is_neg, val: v });
+			Ok( Expression::SubNode(ExprNode {
+				operation: Op::AddSub,
 				values: values,
-				}) })
+				}) )
 		}
 		else
 		{
 			Ok(v)
 		}
 	}
-	// Multiply
-	fn parse_2(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
+	// Multiply / Divide
+	fn parse_2(lexer: &mut Lexer) -> Result<Expression,ParseError> {
 		let mut v = Self::parse_3(lexer)?;
 		let mut values = vec![];
-		while lexer.consume_if( Token::Op('*') ) {
-			values.push(v);
+		let mut is_div = false;
+
+		loop
+		{
+			let new_is_div = if lexer.consume_if(Token::Op('/'))? {
+					true
+				}
+				else if lexer.consume_if(Token::Op('*'))? {
+					false
+				}
+				else {
+					break;
+				};
+			values.push(SubExpression { inverse: is_div, val: v });
+			is_div = new_is_div;
 			v = Self::parse_3(lexer)?;
 		}
 		if values.len() > 0
 		{
-			values.push(v);
-			Ok(SubExpression { negated: false, val: Expression::SubNode(ExprNode {
-				operation: Op::Multiply,
+			values.push(SubExpression { inverse: is_div, val: v });
+			Ok( Expression::SubNode(ExprNode {
+				operation: Op::MulDiv,
 				values: values,
-				}) })
+				}) )
 		}
 		else
 		{
 			Ok(v)
 		}
 	}
-	// Divide
-	fn parse_3(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
-		let mut v = Self::parse_4(lexer)?;
+	// Unary Negation
+	fn parse_3(lexer: &mut Lexer) -> Result<Expression,ParseError> {
+		if lexer.consume_if(Token::Op('-'))?
+		{
+			let mut v = Self::parse_4(lexer)?;
+			Ok(Expression::Negative( Box::new(v) ))
+		}
+		else
+		{
+			Self::parse_4(lexer)
+		}
+	}
+	// Exponent
+	fn parse_4(lexer: &mut Lexer) -> Result<Expression,ParseError> {
+		let mut v = Self::parse_5(lexer)?;
 		let mut values = vec![];
-		while lexer.consume_if( Token::Op('/') ) {
-			values.push(v);
-			v = Self::parse_4(lexer)?;
+
+		loop
+		{
+			if lexer.consume_if(Token::Op('^'))? {
+				false
+			}
+			else {
+				break;
+			};
+			values.push(SubExpression { inverse: false, val: v });
+			v = Self::parse_5(lexer)?;
 		}
 		if values.len() > 0
 		{
-			values.push(v);
-			Ok(SubExpression { negated: false, val: Expression::SubNode(ExprNode {
-				operation: Op::Divide,
+			values.push(SubExpression { inverse: false, val: v });
+			Ok( Expression::SubNode(ExprNode {
+				operation: Op::ExpRoot,
 				values: values,
-				}) })
+				}) )
 		}
 		else
 		{
 			Ok(v)
 		}
 	}
-	// Negation
-	fn parse_4(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
-		let flip_sign = lexer.consume_if(Token::Op('-'));
-		let mut v = Self::parse_5(lexer)?;
-		v.negated ^= flip_sign;
-		Ok(v)
-	}
-	// Exponent
-	fn parse_5(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
-		let v = Self::parse_6(lexer)?;
-		if let Token::Op('^') = lexer.cur() {
-			let mut values = vec![v];
-			while lexer.consume_if( Token::Op('^') ) {
-				// TODO: The exponent can be negative
-				values.push( Self::parse_6(lexer)? );
-			}
-			Ok(SubExpression { negated: false, val: Expression::SubNode(ExprNode {
-				operation: Op::Exponent,
-				values: values,
-				}) })
-		}
-		else {
-			Ok(v)
-		}
-	}
-	fn parse_6(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
+	fn parse_5(lexer: &mut Lexer) -> Result<Expression,ParseError> {
 		Self::parse_value(lexer)
 	}
-	fn parse_value(lexer: &mut Lexer) -> Result<SubExpression,ParseError> {
-		Ok(SubExpression { negated: false, val: match lexer.cur()
+	fn parse_value(lexer: &mut Lexer) -> Result<Expression,ParseError> {
+		Ok(match lexer.cur()
 			{
 			Token::Literal(v) => {
-				lexer.consume();
+				lexer.consume()?;
 				Expression::Literal(v)
 				},
 			Token::Ident(i) => {
-				lexer.consume();
+				lexer.consume()?;
 				Expression::Variable(i.to_owned())
 				},
 			Token::ParenOpen => {
-				lexer.consume();
+				lexer.consume()?;
 				let rv = Self::parse_1(lexer)?;
-				if !lexer.consume_if(Token::ParenClose) {
+				if !lexer.consume_if(Token::ParenClose)? {
 					return Err(ParseError::Unexpected( format!("{:?}", lexer.cur()) ));
 				}
 				return Ok(rv)
 				},
 			_ => return Err(ParseError::Unexpected( format!("{:?}", lexer.cur()) )),
-			} })
+			})
 	}
 }
 

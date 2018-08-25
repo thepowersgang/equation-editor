@@ -168,6 +168,7 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 	{
 		match e
 		{
+		Expression::Negative(sn) => get_level_size_expr(sn, path, last_idx, path_pos),	// TODO: Consume a level?
 		Expression::SubNode(sn) => get_level_size_node(sn,  path,last_idx,  path_pos),
 		Expression::Literal(_v) => { assert!(path_pos == path.len()); None },	// TODO: Impossible?
 		Expression::Variable(_v) => { assert!(path_pos == path.len()); None },
@@ -210,6 +211,7 @@ pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 	{
 		match e
 		{
+		Expression::Negative(e) => h_expr(e, sel, path_pos),
 		Expression::SubNode(sn) => h_node(sn, sel, path_pos),
 		Expression::Literal(_v) => e.clone(),
 		Expression::Variable(_v) => e.clone(),
@@ -257,6 +259,13 @@ fn draw_sub_expression(sink: &mut RenderSink, e: &crate::expression::Expression,
 {
 	match e
 	{
+	Expression::Negative(e) => 
+		match **e
+		{
+		// TODO: Handle selection of this node's inner?
+		Expression::Literal(_) | Expression::Variable(_) => { sink.put("-"); draw_sub_expression(sink, e, sel, path_pos); },
+		_ => { sink.put("-("); draw_sub_expression(sink, e, sel, path_pos); sink.put(")"); },
+		},
 	Expression::SubNode(sn) => draw_sub_expression_node(sink, sn, sel, path_pos),
 	Expression::Literal(v) => sink.put(&v),
 	Expression::Variable(v) => sink.put(&v),
@@ -269,7 +278,6 @@ fn draw_sub_expression_node(sink: &mut RenderSink, e: &crate::expression::ExprNo
 
 	for (i,v) in Iterator::enumerate(e.values.iter())
 	{
-
 		if i == 0
 		{
 		}
@@ -277,20 +285,15 @@ fn draw_sub_expression_node(sink: &mut RenderSink, e: &crate::expression::ExprNo
 		{
 			match e.operation
 			{
-			Op::Add => sink.put(if v.negated { "" } else { "+" }),
-			Op::Multiply => sink.put("*"),
-			Op::Divide   => sink.put("/"),
-			Op::Exponent => sink.put("^"),
+			Op::AddSub => sink.put(if v.inverse { "-" } else { "+" }),
+			Op::MulDiv => sink.put(if v.inverse { "/" } else { "*" }),
+			Op::ExpRoot => sink.put("^"),
 			Op::Equality => sink.put("="),
 			}
 		}
 
 		if path_pos == sel.path.len() && i == sel.first {
 			sink.start_hilight();
-		}
-
-		if v.negated {
-			sink.put("-");
 		}
 
 		let needs_parens = v.val.needs_parens(e.operation);

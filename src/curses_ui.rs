@@ -175,7 +175,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 					lines[cur_line].expr = expr;
 					},
 				Err(e) => {
-					statusline = format!("Error parsing: {}", e).into();
+					statusline = format!("Error parsing: {:?}", e).into();
 					},
 				}
 				redraw = Redraw::All;
@@ -189,7 +189,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 					lines[cur_line].replace_selection( expr );
 					},
 				Err(e) => {
-					statusline = format!("Error parsing: {}", e).into();
+					statusline = format!("Error parsing: {:?}", e).into();
 					},
 				}
 				redraw = Redraw::All;
@@ -207,7 +207,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 					lines.insert(cur_line + 1, crate::Line::from_expr(expr));
 					},
 				Err(e) => {
-					statusline = format!("Error parsing: {}", e).into();
+					statusline = format!("Error parsing: {:?}", e).into();
 					},
 				}
 				redraw = Redraw::All;
@@ -225,7 +225,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 					lines.insert(cur_line, crate::Line::from_expr(expr));
 					},
 				Err(e) => {
-					statusline = format!("Error parsing: {}", e).into();
+					statusline = format!("Error parsing: {:?}", e).into();
 					},
 				}
 				redraw = Redraw::All;
