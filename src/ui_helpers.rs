@@ -201,10 +201,6 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 	get_level_size_expr(e, path, last_idx,  0)
 }
 
-//pub fn render_expression(e: &crate::expression::Expression, sel: &Selection, seg_mask: u8) -> (String, String, String)
-//{
-//}
-
 pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 {
 	fn h_expr(e: &crate::expression::Expression, sel: &Selection, path_pos: usize) -> Expression
@@ -246,69 +242,76 @@ pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 pub fn split_expression(e: &crate::expression::Expression, sel: &Selection) -> (String, String, String)
 {
 	let mut sink = RenderSink::new();
-	draw_sub_expression(&mut sink, e, sel, 0);
+	
+	fn h_expr(sink: &mut RenderSink, e: &crate::expression::Expression, sel: &Selection, path_pos: usize)
+	{
+		match e
+		{
+		Expression::Negative(e) => {
+			sink.put("-");
+			let needs_parens = match **e
+				{
+				Expression::Literal(_) | Expression::Variable(_) => false,
+				_ => true,
+				};
+			// TODO: Handle selection of this node's inner?
+			if needs_parens {
+				sink.put("(");
+			}
+			h_expr(sink, e, sel, path_pos);
+			if needs_parens {
+				sink.put(")");
+			}
+			},
+		Expression::SubNode(sn) => h_node(sink, sn, sel, path_pos),
+		Expression::Literal(v) => sink.put(&v),
+		Expression::Variable(v) => sink.put(&v),
+		}
+	}
+	fn h_node(sink: &mut RenderSink, e: &crate::expression::ExprNode, sel: &Selection, path_pos: usize)
+	{
+		for (i,v) in Iterator::enumerate(e.values.iter())
+		{
+			if i == 0
+			{
+			}
+			else
+			{
+				match e.operation
+				{
+				crate::expression::Op::AddSub => sink.put(if v.inverse { "-" } else { "+" }),
+				crate::expression::Op::MulDiv => sink.put(if v.inverse { "/" } else { "*" }),
+				crate::expression::Op::ExpRoot => sink.put("^"),
+				crate::expression::Op::Equality => sink.put("="),
+				}
+			}
+
+			if path_pos == sel.path.len() && i == sel.first {
+				sink.start_hilight();
+			}
+
+			let needs_parens = v.val.needs_parens(e.operation);
+			if needs_parens {
+				sink.put("(");
+			}
+			h_expr(sink, &v.val, sel, if path_pos < sel.path.len() && sel.path[path_pos] == i { path_pos + 1 } else { !0 });
+			if needs_parens {
+				sink.put(")");
+			}
+
+			if path_pos == sel.path.len() && i == sel.last {
+				sink.end_hilight();
+			}
+		}
+
+		assert!(!(path_pos == sel.path.len() && sink.hilight_active()), "Path was invalid, didn't terminate hilight");
+	}
+
+	h_expr(&mut sink, e, sel, 0);
 	assert!(sink.cur_buf != 1);
 	(
 		::std::mem::replace(&mut sink.buffers[0], String::new()),
 		::std::mem::replace(&mut sink.buffers[1], String::new()),
 		::std::mem::replace(&mut sink.buffers[2], String::new()),
 		)
-}
-
-fn draw_sub_expression(sink: &mut RenderSink, e: &crate::expression::Expression, sel: &Selection, path_pos: usize)
-{
-	match e
-	{
-	Expression::Negative(e) => 
-		match **e
-		{
-		// TODO: Handle selection of this node's inner?
-		Expression::Literal(_) | Expression::Variable(_) => { sink.put("-"); draw_sub_expression(sink, e, sel, path_pos); },
-		_ => { sink.put("-("); draw_sub_expression(sink, e, sel, path_pos); sink.put(")"); },
-		},
-	Expression::SubNode(sn) => draw_sub_expression_node(sink, sn, sel, path_pos),
-	Expression::Literal(v) => sink.put(&v),
-	Expression::Variable(v) => sink.put(&v),
-	}
-}
-fn draw_sub_expression_node(sink: &mut RenderSink, e: &crate::expression::ExprNode, sel: &Selection, path_pos: usize)
-{
-	//println!("path_pos={} e={:?}", path_pos, e);
-	use crate::expression::Op;
-
-	for (i,v) in Iterator::enumerate(e.values.iter())
-	{
-		if i == 0
-		{
-		}
-		else
-		{
-			match e.operation
-			{
-			Op::AddSub => sink.put(if v.inverse { "-" } else { "+" }),
-			Op::MulDiv => sink.put(if v.inverse { "/" } else { "*" }),
-			Op::ExpRoot => sink.put("^"),
-			Op::Equality => sink.put("="),
-			}
-		}
-
-		if path_pos == sel.path.len() && i == sel.first {
-			sink.start_hilight();
-		}
-
-		let needs_parens = v.val.needs_parens(e.operation);
-		if needs_parens {
-			sink.put("(");
-		}
-		draw_sub_expression(sink, &v.val, sel, if path_pos < sel.path.len() && sel.path[path_pos] == i { path_pos + 1 } else { !0 });
-		if needs_parens {
-			sink.put(")");
-		}
-
-		if path_pos == sel.path.len() && i == sel.last {
-			sink.end_hilight();
-		}
-	}
-
-	assert!(!(path_pos == sel.path.len() && sink.hilight_active()), "Path was invalid, didn't terminate hilight");
 }
