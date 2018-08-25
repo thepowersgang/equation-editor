@@ -200,6 +200,47 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 	get_level_size_expr(e, path, last_idx,  0)
 }
 
+//pub fn render_expression(e: &crate::expression::Expression, sel: &Selection, seg_mask: u8) -> (String, String, String)
+//{
+//}
+
+pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
+{
+	fn h_expr(e: &crate::expression::Expression, sel: &Selection, path_pos: usize) -> Expression
+	{
+		match e
+		{
+		Expression::SubNode(sn) => h_node(sn, sel, path_pos),
+		Expression::Literal(_v) => e.clone(),
+		Expression::Variable(_v) => e.clone(),
+		}
+	}
+	fn h_node(e: &crate::expression::ExprNode, sel: &Selection, path_pos: usize) -> Expression
+	{
+		assert!(path_pos <= sel.path.len());
+		if path_pos < sel.path.len() {
+			let idx = sel.path[path_pos];
+			assert!( idx < e.values.len() );
+			h_expr( &e.values[idx].val, sel, path_pos+1 )
+		}
+		else if sel.first == sel.last {
+			// TODO: Negations?
+			e.values[sel.first].val.clone()
+		}
+		else {
+			let mut rv = crate::expression::ExprNode {
+				operation: e.operation,
+				values: vec![],
+				};
+			for se in e.values[sel.first .. sel.last+1].iter() {
+				rv.values.push( se.clone() );
+			}
+			Expression::SubNode( rv )
+		}
+	}
+	h_expr(e, sel, 0)
+}
+
 pub fn split_expression(e: &crate::expression::Expression, sel: &Selection) -> (String, String, String)
 {
 	let mut sink = RenderSink::new();

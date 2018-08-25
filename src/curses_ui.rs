@@ -3,8 +3,7 @@
 //!
 
 use crate::expression::Expression;
-use crate::ui_helpers::split_expression;
-use crate::ui_helpers::Selection;
+//use crate::ui_helpers::Selection;
 use pancurses as pc;
 
 struct WindowFmt<'a>(&'a pc::Window);
@@ -39,16 +38,9 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 	enum InputMode
 	{
 		LineSelect,
-		LineSelectExt,
 		ExprPick,	// Pick a single sub-expression
 		ExprSelect,	// Select a range of sub-expressions
 		ExprMove,	// Cursor keys move the insertion point around the same level as the selection, esc ends
-	}
-	enum AltMode
-	{
-		None,
-		CutPaste(usize),	// Selecting a location to paste a line
-		CopyPaste(usize),	// Selecting a location to paste a copy of a line
 	}
 	#[derive(PartialEq,Debug)]
 	enum Redraw
@@ -57,47 +49,74 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Current,
 		All,
 	}
+	enum Clipboard
+	{
+		Empty,
+		Line(crate::Line),
+		Expr(Expression),
+	}
 	let mut cur_line = 0;
 	let mut mode = InputMode::LineSelect;
-	let mut alt_mode = AltMode::None;
+	let mut clipboard = Clipboard::Empty;
+	let mut statusline = std::borrow::Cow::from("");
 
 	let mut last_line = 0;
 	let mut redraw = Redraw::All;
-	loop {
-		if cur_line != last_line && redraw != Redraw::All {
-			window.mv(last_line as i32, 2);
-			draw_expression_nosel(&window, &lines[last_line].expr);
-			last_line = cur_line;
-			redraw = Redraw::Current;
-		}
+	loop
+	{
+		// Re-draw the entire set of expressions
 		if redraw == Redraw::All
 		{
-			window.clear();
+			for y in 0 .. window.get_max_y() {
+				if y == window.get_max_y() - 2 {
+					// Skip the debug line
+					continue ;
+				}
+				window.mv(y, 0);
+				window.hline(' ', window.get_max_x());
+			}
 			for (i, line) in lines.iter().enumerate()
 			{
 				window.mv(i as i32, 2);
 				draw_expression_nosel(&window, &line.expr);
 			}
 		}
+
+		// If the current line changed, re-render the old line with no selection
+		if cur_line != last_line
+		{
+			if redraw != Redraw::All
+			{
+				window.mv(last_line as i32, 2);
+				draw_expression_nosel(&window, &lines[last_line].expr);
+			}
+
+			//cur_sel = Selection::new();
+			last_line = cur_line;
+			redraw = Redraw::Current;
+		}
+
 		if redraw != Redraw::None
 		{
 			let line = &lines[cur_line];
 			window.mv(cur_line as i32, 2);
 			window.clrtoeol();
-			if mode == InputMode::LineSelect || mode == InputMode::LineSelectExt { 
+			if mode == InputMode::LineSelect { 
 				window.attron(pc::Attribute::Bold);
 				draw_expression_nosel(&window, &line.expr);
 				window.attroff(pc::Attribute::Bold);
 			}
 			else {
-				draw_expression(&window, &line.expr, &line.sel);
+				draw_expression(&window, &line);
 			}
 			
 			{
+				window.mv( window.get_max_y() - 1, 0 );
+				window.addstr(&statusline);
+				statusline = "".into();
 				let v = match mode
 					{
 					InputMode::LineSelect => "LINE",
-					InputMode::LineSelectExt => "LINE (ALT)",
 					InputMode::ExprPick => "PICK",
 					InputMode::ExprSelect => "SELECT",
 					InputMode::ExprMove => "MOVE",
@@ -115,9 +134,14 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		{
 		Some(pc::Input::Character('q')) => break,
 		Some(pc::Input::Character('.')) => {
-			if let Some(opid) = show_menu_modal(&window, &["Extract common factors", "Distribute", "Edit expression"])
+			if let Some(opid) = show_menu_modal(&window, &["Extract common factors", "Distribute"])
 			{
-				log!(window, "option {:?}", opid);
+				match opid
+				{
+				0 => log!(window, "TODO: Extract common factors"),
+				1 => log!(window, "TODO: Distribute leading multiplication"),
+				_ => log!(window, "BUG: Unknown operation {}", opid),
+				}
 			}
 			else
 			{
@@ -139,17 +163,96 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 			_ => {},
 			},
 
-		// TODO: Should this use a clipboard instead?
-		Some(pc::Input::Character('D')) | Some(pc::Input::Character('d')) =>
+		Some(pc::Input::Character('a')) | Some(pc::Input::Character('i')) | Some(pc::Input::Character('e')) =>
 			match mode
 			{
 			InputMode::LineSelect => {
-				mode = InputMode::LineSelectExt;
-				alt_mode = AltMode::CutPaste(cur_line);
-				redraw = Redraw::Current;
+				let s = format!("{}", lines[cur_line].expr);
+				let v = show_input_modal(&window, &s);
+				match v.parse::<crate::expression::Expression>()
+				{
+				Ok(expr) => {
+					lines[cur_line].expr = expr;
+					},
+				Err(e) => {
+					statusline = format!("Error parsing: {}", e).into();
+					},
+				}
+				redraw = Redraw::All;
 				},
-			InputMode::ExprSelect => {
+			InputMode::ExprSelect | InputMode::ExprPick => {
+				let s = lines[cur_line].render_selection();
+				let v = show_input_modal(&window, &s);
+				match v.parse::<crate::expression::Expression>()
+				{
+				Ok(expr) => {
+					lines[cur_line].replace_selection( expr );
+					},
+				Err(e) => {
+					statusline = format!("Error parsing: {}", e).into();
+					},
+				}
+				redraw = Redraw::All;
+				},
+			_ => {},
+			}
+		Some(pc::Input::Character('o')) =>
+			match mode
+			{
+			InputMode::LineSelect => {
+				let v = show_input_modal(&window, "");
+				match v.parse::<crate::expression::Expression>()
+				{
+				Ok(expr) => {
+					lines.insert(cur_line + 1, crate::Line::from_expr(expr));
+					},
+				Err(e) => {
+					statusline = format!("Error parsing: {}", e).into();
+					},
+				}
+				redraw = Redraw::All;
+				},
+			_ => {},
+			},
+		Some(pc::Input::Character('O')) =>
+			match mode
+			{
+			InputMode::LineSelect => {
+				let v = show_input_modal(&window, "");
+				match v.parse::<crate::expression::Expression>()
+				{
+				Ok(expr) => {
+					lines.insert(cur_line, crate::Line::from_expr(expr));
+					},
+				Err(e) => {
+					statusline = format!("Error parsing: {}", e).into();
+					},
+				}
+				redraw = Redraw::All;
+				},
+			_ => {},
+			},
+
+		Some(pc::Input::Character('D')) =>
+			match mode
+			{
+			InputMode::LineSelect => {
+				if cur_line < lines.len() {
+					clipboard = Clipboard::Line( lines.remove(cur_line) );
+					// TODO: Avoid this?
+					if cur_line != 0 {
+						cur_line -= 1;
+					}
+					statusline = "Line moved to clipboard".into();
+				}
+				else {
+					// TODO: Warning?
+				}
+				redraw = Redraw::All;
+				},
+			InputMode::ExprSelect | InputMode::ExprPick => {
 				// TODO: Cut/Paste expressions
+				// - Reqires removing the expression
 				},
 			_ => {},
 			},
@@ -157,71 +260,52 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 			match mode
 			{
 			InputMode::LineSelect => {
-				mode = InputMode::LineSelectExt;
-				alt_mode = AltMode::CopyPaste(cur_line);
-				redraw = Redraw::Current;
+				if cur_line < lines.len() {
+					clipboard = Clipboard::Line( lines[cur_line].clone() );
+					statusline = "Line copied to clipboard".into();
+					redraw = Redraw::Current;
+				}
+				else {
+					// TODO: Warning?
+				}
 				},
-			InputMode::ExprSelect => {
-				// TODO: Copy/paste expressions
+			InputMode::ExprSelect | InputMode::ExprPick => {
+				clipboard = Clipboard::Expr( lines[cur_line].extract_selection() );
+				statusline = "Expression copied to clipboard".into();
+				redraw = Redraw::Current;
 				},
 			_ => {},
 			},
 		Some(pc::Input::Character('P')) =>
 			match mode
 			{
-			InputMode::LineSelectExt => {
-				match alt_mode
+			InputMode::LineSelect =>
+				match std::mem::replace(&mut clipboard, Clipboard::Empty)
 				{
-				AltMode::None => panic!(""),
-				AltMode::CopyPaste(src) => {
-					let v = lines[src].clone();
-					lines.insert(cur_line, v);
-					mode = InputMode::LineSelect;
+				Clipboard::Empty => {},
+				Clipboard::Expr(_) => {},
+				Clipboard::Line(l) => {
+					lines.insert(cur_line, l);
 					redraw = Redraw::All;
 					},
-				AltMode::CutPaste(src) => {
-					let v = lines.remove(src);
-					if src < cur_line {
-						cur_line -= 1;
-					}
-					lines.insert(cur_line, v);
-					mode = InputMode::LineSelect;
-					redraw = Redraw::All;
-					},
-				}
-				alt_mode = AltMode::None;
 				},
 			_ => {},
 			},
 		Some(pc::Input::Character('p')) =>
 			match mode
 			{
-			InputMode::LineSelectExt => {
-				match alt_mode
+			InputMode::LineSelect =>
+				match std::mem::replace(&mut clipboard, Clipboard::Empty)
 				{
-				AltMode::None => panic!(""),
-				AltMode::CopyPaste(src) => {
-					let v = lines[src].clone();
-					lines.insert(cur_line+1, v);
-					cur_line += 1;
-					mode = InputMode::LineSelect;
-					redraw = Redraw::All;
-					},
-				AltMode::CutPaste(src) => {
-					if src != cur_line
-					{
-						let v = lines.remove(src);
-						if src <= cur_line {
-							cur_line -= 1;
-						}
-						lines.insert(cur_line+1, v);
+				Clipboard::Empty => {},
+				Clipboard::Expr(_) => {},
+				Clipboard::Line(l) => {
+					if cur_line < lines.len() {
 						cur_line += 1;
 					}
-					mode = InputMode::LineSelect;
+					lines.insert(cur_line, l);
 					redraw = Redraw::All;
 					},
-				}
-				alt_mode = AltMode::None;
 				},
 			_ => {},
 			},
@@ -237,7 +321,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeyUp) | Some(pc::Input::Character('k')) =>
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				if cur_line > 0 {
 					cur_line -= 1;
 					redraw = Redraw::Current;
@@ -262,7 +346,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeyDown) | Some(pc::Input::Character('j')) =>
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				if cur_line+1 < lines.len() {
 					cur_line += 1;
 					redraw = Redraw::Current;
@@ -287,7 +371,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeyRight) | Some(pc::Input::Character('l')) => 
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				// No left/right in line select mode
 				},
 			InputMode::ExprPick => {
@@ -315,7 +399,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeyLeft) | Some(pc::Input::Character('h')) => 
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				// No left/right in line select mode
 				},
 			InputMode::ExprPick => {
@@ -343,7 +427,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeySRight) | Some(pc::Input::Character('L')) =>
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				// No left/right in line select mode
 				},
 			InputMode::ExprPick => {
@@ -371,7 +455,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::KeySLeft) | Some(pc::Input::Character('H')) =>
 			match mode
 			{
-			InputMode::LineSelect | InputMode::LineSelectExt => {
+			InputMode::LineSelect => {
 				// No left/right in line select mode
 				},
 			InputMode::ExprPick => {
@@ -404,6 +488,81 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 	pc::endwin();
 }
 
+fn show_input_modal(win: &pc::Window, prime_value: &str) -> String
+{
+	let (mut before, mut after) = (prime_value.to_owned(), Vec::<char>::new(),);
+
+	let w = win.get_max_x() - 4;
+	let h = 3;
+	let x = 1;
+	let y = win.get_max_y() / 2 - h/2;
+	win.mv(y+0,x);
+	win.addch('/');
+	for _ in 0 .. w {
+		win.addch('-');
+	}
+	win.addch('\\');
+	win.mv(y+1,x);
+	win.addch('|');
+	for _ in 0 .. w {
+		win.addch(' ');
+	}
+	win.addch('|');
+	win.mv(y+2,x);
+	win.addch('\\');
+	for _ in 0 .. w {
+		win.addch('-');
+	}
+	win.addch('/');
+
+	loop
+	{
+		if true
+		{
+			win.mv(y+1,x+2);
+			win.addstr(&before);
+			for v in after.iter().rev() {
+				win.addch(*v);
+			}
+			for _ in (before.len() + after.len()) .. w as usize {
+				win.addch(' ');
+			}
+
+			win.mv(y+1, x+2+before.len() as i32);
+			pc::curs_set(1);	// Hide the cursor
+			win.refresh();
+		}
+
+		match win.getch()
+		{
+		Some(pc::Input::KeyEnter) | Some(pc::Input::Character('\n')) => {
+			pc::curs_set(0);	// Hide the cursor
+			while let Some(v) = after.pop() {
+				before.push(v);
+			}
+			return before;
+			},
+		Some(pc::Input::KeyRight) => {
+			if let Some(c) = after.pop() {
+				before.push(c)
+			}
+			},
+		Some(pc::Input::KeyLeft) => {
+			if let Some(c) = before.pop() {
+				after.push(c)
+			}
+			},
+		Some(pc::Input::KeyBackspace) => {
+			let _ = before.pop();
+			},
+		Some(pc::Input::Character(v @ ' ' ... 'z')) => {
+			before.push(v);
+			},
+		_ => {},
+		}
+
+	}
+}
 fn show_menu_modal(win: &pc::Window, options: &[&str]) -> Option<usize>
 {
 	let h = options.len() as i32;
@@ -480,9 +639,9 @@ fn draw_expression_nosel(win: &pc::Window, e: &Expression)
 	use std::fmt::Write;
 	write!(WindowFmt(win), "{}", e);
 }
-fn draw_expression(win: &pc::Window, e: &Expression, sel: &Selection)
+fn draw_expression(win: &pc::Window, line: &crate::Line)
 {
-	let (before, hilight, after,) = split_expression(e, sel);
+	let (before, hilight, after,) = line.render_split();
 	if hilight.len() > 0
 	{
 		win.addstr(&before);

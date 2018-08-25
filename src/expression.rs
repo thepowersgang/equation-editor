@@ -18,11 +18,12 @@ pub enum Expression
 #[derive(Debug,Clone)]
 pub struct SubExpression
 {
+	// TODO: Use this same flag for / instead of *
 	pub negated: bool,
 	pub val: Expression,
 }
 
-/// Representation of a chained set of expressions (e.g. `a + b + c` or `a / b / c`)
+/// Representation of a chained set of expressions with the same precedence (e.g. `a + b - c` or `a / b * c`)
 #[derive(Debug,Clone)]
 pub struct ExprNode
 {
@@ -146,6 +147,8 @@ enum ParseError {
 enum Token<'a> {
 	Eof,
 	Whitespace,
+	Comment(&'a str),
+	UnexpectedCharacter(char),
 	Ident(&'a str),
 	Literal(f32),
 	Op(char),
@@ -153,26 +156,27 @@ enum Token<'a> {
 	ParenClose,
 }
 ::plex::lexer! {
-	fn lex_next_token(text: 'a) -> (Token<'a>, &'a str);
+	fn lex_next_token(text: 'a) -> Token<'a>;
 
-	r#"[ \t\r\n]+"# => (Token::Whitespace, text),
-	r#"[0-9]+(\.[0-9]*)?"# => (
+	r#"[ \t\r\n]+"# => Token::Whitespace,
+	r#"#.*"# => Token::Comment(text),
+	r#"[0-9]+(\.[0-9]*)?"# =>
             if let Ok(i) = text.parse() {
                 Token::Literal(i)
             } else {
                 panic!("integer {} is out of range", text)
-            }, text),
-	r#"[a-zA-Z][a-zA-Z0-9_']*"# => (Token::Ident(text), text),
-	r#"\+"# => (Token::Op('+'), text),
-	r#"-"#  => (Token::Op('-'), text),
-	r#"\*"# => (Token::Op('*'), text),
-	r#"/"#  => (Token::Op('/'), text),
-	r#"\^"# => (Token::Op('^'), text),
-	r#"="#  => (Token::Op('='), text),
+            },
+	r#"[a-zA-Z][a-zA-Z0-9_']*"# => Token::Ident(text),
+	r#"\+"# => Token::Op('+'),
+	r#"-"#  => Token::Op('-'),
+	r#"\*"# => Token::Op('*'),
+	r#"/"#  => Token::Op('/'),
+	r#"\^"# => Token::Op('^'),
+	r#"="#  => Token::Op('='),
 
-	r#"\("# => (Token::ParenOpen, text),
-	r#"\)"# => (Token::ParenClose, text),
-	r"." => panic!("Unexpected character: {}", text),
+	r#"\("# => Token::ParenOpen,
+	r#"\)"# => Token::ParenClose,
+	r"." => Token::UnexpectedCharacter(text.chars().next().unwrap()),
 }
 struct Lexer<'a>
 {
@@ -195,18 +199,21 @@ impl<'a> Lexer<'a>
 		let mut t;
 		loop
 		{
-			t = if let Some( ( (tok,_), new_rem) ) = lex_next_token(self.remaining) {
+			t = if let Some( (tok, new_rem) ) = lex_next_token(self.remaining) {
 					self.remaining = new_rem;
 					tok
 				}
 				else {
 					Token::Eof
 				};
-			if t != Token::Whitespace {
-				break;
+			if let Token::Comment(_) = t {
+				continue ;
 			}
+			if t == Token::Whitespace {
+				continue ;
+			}
+			break;
 		}
-		//println!("{:?} => {:?}", self.cur_token, t);
 		::std::mem::replace(&mut self.cur_token, t)
 	}
 	pub fn cur(&self) -> Token<'a> {

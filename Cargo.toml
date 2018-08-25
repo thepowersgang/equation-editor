@@ -8,6 +8,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-iui = "*"
+iui = "0.3"
 pancurses = "0.16"
-plex = "*"
+plex = "0.2.3"
+structopt = "0.2"
