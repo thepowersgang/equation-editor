@@ -49,8 +49,7 @@ enum Precedence
 {
 	Equality,
 	AddSub,
-	Div,
-	Mul,
+	MulDiv,
 	Exp,
 	Lit,
 }
@@ -62,7 +61,7 @@ impl Precedence
 		{
 		Op::Equality => Precedence::Equality,
 		Op::AddSub => Precedence::AddSub,
-		Op::MulDiv => Precedence::Mul,
+		Op::MulDiv => Precedence::MulDiv,
 		Op::ExpRoot => Precedence::Exp,
 		}
 	}
@@ -335,7 +334,7 @@ impl Expression
 	fn parse_3(lexer: &mut Lexer) -> Result<Expression,ParseError> {
 		if lexer.consume_if(Token::Op('-'))?
 		{
-			let mut v = Self::parse_4(lexer)?;
+			let v = Self::parse_4(lexer)?;
 			Ok(Expression::Negative( Box::new(v) ))
 		}
 		else
