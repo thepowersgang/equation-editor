@@ -111,6 +111,7 @@ impl Line {
 		crate::ui_helpers::extract_subexpression(&self.expr, &self.sel)
 	}
 	fn replace_selection(&mut self, e: expression::Expression) {
+		crate::ui_helpers::replace_subexpression(&mut self.expr, &mut self.sel, e)
 	}
 
 	fn move_out(&mut self) -> bool {
