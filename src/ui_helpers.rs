@@ -1,4 +1,5 @@
 use crate::expression::Expression;
+use crate::expression::ExprNode;
 
 #[derive(Clone)]
 pub struct Selection {
@@ -168,13 +169,20 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 	{
 		match e
 		{
-		Expression::Negative(sn) => get_level_size_expr(sn, path, last_idx, path_pos),	// TODO: Consume a level?
+		Expression::Negative(sn) =>
+			if path_pos == path.len() {
+				assert!(last_idx == 0);
+				Some(1)
+			}
+			else {
+				get_level_size_expr(sn, path, last_idx, path_pos+1)
+			},
 		Expression::SubNode(sn) => get_level_size_node(sn,  path,last_idx,  path_pos),
 		Expression::Literal(_v) => { assert!(path_pos == path.len()); None },	// TODO: Impossible?
 		Expression::Variable(_v) => { assert!(path_pos == path.len()); None },
 		}
 	}
-	fn get_level_size_node(e: &crate::expression::ExprNode, path: &[usize], last_idx: usize, path_pos: usize) -> Option<usize>
+	fn get_level_size_node(e: &ExprNode, path: &[usize], last_idx: usize, path_pos: usize) -> Option<usize>
 	{
 		assert!(path_pos <= path.len());
 		if path_pos == path.len() {
@@ -187,6 +195,7 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 				assert!( idx < e.values.len() );
 				match e.values[idx].val
 				{
+				Expression::Negative(_) => Some(1),
 				Expression::SubNode(ref sn) => Some(sn.values.len()),
 				_ => None,
 				}
@@ -203,17 +212,23 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 
 pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 {
-	fn h_expr(e: &crate::expression::Expression, sel: &Selection, path_pos: usize) -> Expression
+	fn h_expr(e: &Expression, sel: &Selection, path_pos: usize) -> Expression
 	{
 		match e
 		{
-		Expression::Negative(e) => h_expr(e, sel, path_pos),
+		Expression::Negative(e) =>
+			if path_pos == sel.path.len() {
+				(**e).clone()
+			}
+			else {
+				h_expr(e, sel, path_pos+1)
+			},
 		Expression::SubNode(sn) => h_node(sn, sel, path_pos),
 		Expression::Literal(_v) => e.clone(),
 		Expression::Variable(_v) => e.clone(),
 		}
 	}
-	fn h_node(e: &crate::expression::ExprNode, sel: &Selection, path_pos: usize) -> Expression
+	fn h_node(e: &ExprNode, sel: &Selection, path_pos: usize) -> Expression
 	{
 		assert!(path_pos <= sel.path.len());
 		if path_pos < sel.path.len() {
@@ -221,12 +236,14 @@ pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 			assert!( idx < e.values.len() );
 			h_expr( &e.values[idx].val, sel, path_pos+1 )
 		}
+		// Single expression
 		else if sel.first == sel.last {
-			// TODO: Negations?
 			e.values[sel.first].val.clone()
 		}
+		// Range of expressions
+		// TODO: When copying, should the operator be included?
 		else {
-			let mut rv = crate::expression::ExprNode {
+			let mut rv = ExprNode {
 				operation: e.operation,
 				values: vec![],
 				};
@@ -239,11 +256,11 @@ pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 	h_expr(e, sel, 0)
 }
 
-pub fn split_expression(e: &crate::expression::Expression, sel: &Selection) -> (String, String, String)
+pub fn split_expression(e: &Expression, sel: &Selection) -> (String, String, String)
 {
 	let mut sink = RenderSink::new();
 	
-	fn h_expr(sink: &mut RenderSink, e: &crate::expression::Expression, sel: &Selection, path_pos: usize)
+	fn h_expr(sink: &mut RenderSink, e: &Expression, sel: &Selection, path_pos: usize)
 	{
 		match e
 		{
@@ -254,13 +271,25 @@ pub fn split_expression(e: &crate::expression::Expression, sel: &Selection) -> (
 				Expression::Literal(_) | Expression::Variable(_) => false,
 				_ => true,
 				};
-			// TODO: Handle selection of this node's inner?
+			if path_pos < sel.path.len() {
+				assert!(sel.path[path_pos] == 0);
+			}
+			if path_pos == sel.path.len() {
+				assert!(sel.first == 0);
+				assert!(sel.last == 0);
+			}
+			if path_pos == sel.path.len() {
+				sink.start_hilight();
+			}
 			if needs_parens {
 				sink.put("(");
 			}
-			h_expr(sink, e, sel, path_pos);
+			h_expr(sink, e, sel, if path_pos < sel.path.len() { path_pos+1 } else { !0 });
 			if needs_parens {
 				sink.put(")");
+			}
+			if path_pos == sel.path.len() {
+				sink.end_hilight();
 			}
 			},
 		Expression::SubNode(sn) => h_node(sink, sn, sel, path_pos),
@@ -268,7 +297,7 @@ pub fn split_expression(e: &crate::expression::Expression, sel: &Selection) -> (
 		Expression::Variable(v) => sink.put(&v),
 		}
 	}
-	fn h_node(sink: &mut RenderSink, e: &crate::expression::ExprNode, sel: &Selection, path_pos: usize)
+	fn h_node(sink: &mut RenderSink, e: &ExprNode, sel: &Selection, path_pos: usize)
 	{
 		for (i,v) in Iterator::enumerate(e.values.iter())
 		{
