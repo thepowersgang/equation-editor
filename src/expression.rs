@@ -8,14 +8,14 @@ pub enum Op
 	Divide,
 	Exponent,
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum Expression
 {
 	SubNode(ExprNode),
 	Literal(f32),
 	Variable(String),
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct SubExpression
 {
 	pub negated: bool,
@@ -23,7 +23,7 @@ pub struct SubExpression
 }
 
 /// Representation of a chained set of expressions (e.g. `a + b + c` or `a / b / c`)
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct ExprNode
 {
 	pub operation: Op,
@@ -176,7 +176,7 @@ enum Token<'a> {
 }
 struct Lexer<'a>
 {
-	base: &'a str,
+	//base: &'a str,
 	remaining: &'a str,
 	cur_token: Token<'a>,
 }
@@ -184,7 +184,7 @@ impl<'a> Lexer<'a>
 {
 	fn new(s: &'a str) -> Lexer {
 		let mut rv = Lexer {
-			base: s,
+			//base: s,
 			remaining: s,
 			cur_token: Token::Eof,
 			};

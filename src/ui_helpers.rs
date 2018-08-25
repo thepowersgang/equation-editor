@@ -1,5 +1,6 @@
 use crate::expression::Expression;
 
+#[derive(Clone)]
 pub struct Selection {
 	pub path: Vec<usize>,
 	pub first: usize,
@@ -23,7 +24,7 @@ impl Selection
 			get_level_size(e, &[], !0).unwrap()
 		}
 	}
-	pub fn move_out(&mut self, e: &Expression) -> bool
+	pub fn move_out(&mut self, _e: &Expression) -> bool
 	{
 		if let Some(v) = self.path.pop()
 		{
@@ -72,7 +73,7 @@ impl Selection
 		}
 	}
 
-	pub fn shift_left(&mut self, e: &Expression) -> bool
+	pub fn shift_left(&mut self, _e: &Expression) -> bool
 	{
 		// NOTE: This forces the right to equal the left
 		if self.first > 0 {
@@ -97,10 +98,31 @@ impl Selection
 			false
 		}
 	}
-	pub fn expand_left(&mut self, e: &Expression) -> bool
+	pub fn expand_left(&mut self, _e: &Expression) -> bool
 	{
 		if self.first > 0 {
 			self.first -= 1;
+			true
+		}
+		else {
+			false
+		}
+	}
+
+	pub fn shrink_right(&mut self, _e: &Expression) -> bool
+	{
+		if self.last > self.first {
+			self.last -= 1;
+			true
+		}
+		else {
+			false
+		}
+	}
+	pub fn shrink_left(&mut self, _e: &Expression) -> bool
+	{
+		if self.first < self.last {
+			self.first += 1;
 			true
 		}
 		else {
@@ -147,8 +169,8 @@ fn get_level_size(e: &Expression, path: &[usize], last_idx: usize) -> Option<usi
 		match e
 		{
 		Expression::SubNode(sn) => get_level_size_node(sn,  path,last_idx,  path_pos),
-		Expression::Literal(v) => { assert!(path_pos == path.len()); None },	// TODO: Impossible?
-		Expression::Variable(v) => { assert!(path_pos == path.len()); None },
+		Expression::Literal(_v) => { assert!(path_pos == path.len()); None },	// TODO: Impossible?
+		Expression::Variable(_v) => { assert!(path_pos == path.len()); None },
 		}
 	}
 	fn get_level_size_node(e: &crate::expression::ExprNode, path: &[usize], last_idx: usize, path_pos: usize) -> Option<usize>
