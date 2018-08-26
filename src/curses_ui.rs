@@ -141,9 +141,11 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 				{
 					match opid
 					{
+					// Simplify the expression (remove unneeded parens, merge exponents)
 					0 => {
 						crate::manip::simplify(&mut lines[cur_line].expr);
 						},
+					// Compare with clipboard
 					1 =>
 						match clipboard
 						{
@@ -155,6 +157,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 						_ => {
 							},
 						},
+					// TODO: Substitutions
 					_ => {},
 					}
 				}
@@ -165,8 +168,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 				redraw = Redraw::All;
 				},
 			InputMode::ExprPick | InputMode::ExprSelect => {
-				// TODO: Add "Extract leading" and "Extract trailing"?
-				if let Some(opid) = show_menu_modal(&window, &["Factorise All", "Factorise Leading", "Factorise Trailing", "Distribute Leading"])
+				if let Some(opid) = show_menu_modal(&window, &["Factorise All", "Factorise Leading", "Factorise Trailing", "Distribute Leading", "Substitute", "Extract"])
 				{
 					let e = lines[cur_line].extract_selection();
 					let (res, opname) = match opid
@@ -180,9 +182,57 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 						2 => {
 							(crate::manip::factorise_trailing(e), "factorise leading",)
 							},
-						4 => {
+						3 => {
 							//(crate::manip::distribute_leading(e), "distribute leading",)
 							(None, "",)
+							},
+						// Automatic substitution
+						4 => {
+							if let Expression::Variable(v) = e {
+								let mut rv = None;
+								// Search up from the current line for an assignment
+								for line in lines[0 .. cur_line].iter().rev() {
+									use crate::expression::{ExprNode,Op};
+									if let Expression::SubNode(ExprNode { operation: Op::Equality, ref values }) = line.expr
+									{
+										if let Expression::Variable(ref v2) = values[0].val
+										{
+											// Take the first one that is of the form `<v> = ...`
+											if *v2 == v
+											{
+												rv = Some(values[1].val.clone());
+												break ;
+											}
+										}
+									}
+								}
+								(rv, "substitute",)
+							}
+							else {
+								(None, "substitute",)
+							}
+							},
+						// Replacements
+						5 => {
+							let name = show_input_modal(&window, "");
+							if name != ""
+							{
+								// Add a new line below with the contents of this sub-expression assigned
+								lines.insert(cur_line+1, crate::Line::from_expr(Expression::SubNode(crate::expression::ExprNode {
+										operation: crate::expression::Op::Equality,
+										values: vec![
+											crate::expression::SubExpression { inverse: false, val: Expression::Variable(name.clone()), },
+											crate::expression::SubExpression { inverse: false, val: e, },
+											]
+										}) ));
+								// And replace the selection with a variable reference
+								( Some(Expression::Variable(name)), "" )
+							}
+							else
+							{
+								// No action
+								(None, "extract expression",)
+							}
 							},
 						_ => {
 							(None, "",)
@@ -220,9 +270,9 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 				mode = InputMode::ExprPick;
 				redraw = Redraw::Current;
 				},
-			InputMode::ExprSelect | InputMode::ExprPick => {
-				mode = InputMode::ExprMove;
-				},
+			//InputMode::ExprSelect | InputMode::ExprPick => {
+			//	mode = InputMode::ExprMove;
+			//	},
 			_ => {},
 			},
 
