@@ -258,7 +258,7 @@ pub fn extract_subexpression(e: &Expression, sel: &Selection) -> Expression
 
 pub fn replace_subexpression(e: &mut Expression, sel: &mut Selection, new_e: Expression)
 {
-	fn h_expr(e: &mut Expression, sel: &mut Selection, path_pos: usize, new_e: Expression)
+	fn h_expr(e: &mut Expression, sel: &mut Selection, path_pos: usize, new_e: Expression, simplify: bool)
 	{
 		match e
 		{
@@ -267,24 +267,32 @@ pub fn replace_subexpression(e: &mut Expression, sel: &mut Selection, new_e: Exp
 				**e = new_e;
 			}
 			else {
-				h_expr(e, sel, path_pos+1, new_e)
+				h_expr(e, sel, path_pos+1, new_e, simplify)
 			},
-		Expression::SubNode(sn) => h_node(sn, sel, path_pos, new_e),
+		Expression::SubNode(sn) => h_node(sn, sel, path_pos, new_e, simplify),
 		Expression::Literal(_v) => panic!(""),
 		Expression::Variable(_v) => panic!(""),
 		}
 	}
-	fn h_node(e: &mut ExprNode, sel: &mut Selection, path_pos: usize, mut new_e: Expression)
+	fn h_node(e: &mut ExprNode, sel: &mut Selection, path_pos: usize, mut new_e: Expression, simplify: bool)
 	{
 		assert!(path_pos <= sel.path.len());
 		if path_pos < sel.path.len() {
 			let idx = sel.path[path_pos];
 			assert!( idx < e.values.len() );
-			h_expr( &mut e.values[idx].val, sel, path_pos+1, new_e )
+			h_expr( &mut e.values[idx].val, sel, path_pos+1, new_e, simplify )
 		}
 		// Single expression
 		else if sel.first == sel.last {
-			e.values[sel.first].val = new_e;
+			match new_e
+			{
+			Expression::SubNode(ref isn) if simplify && isn.operation == e.operation => {
+				panic!("TODO: Merge");
+				},
+			_ => {
+				e.values[sel.first].val = new_e;
+				}
+			}
 		}
 		// Range of expressions
 		else {
@@ -307,7 +315,7 @@ pub fn replace_subexpression(e: &mut Expression, sel: &mut Selection, new_e: Exp
 			// TODO: Should this update the selection too?
 		}
 	}
-	h_expr(e, sel, 0, new_e)
+	h_expr(e, sel, 0, new_e, /*simplify=*/false)
 }
 
 pub fn split_expression(e: &Expression, sel: &Selection) -> (String, String, String)

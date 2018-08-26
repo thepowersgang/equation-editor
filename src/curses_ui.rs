@@ -136,6 +136,34 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		Some(pc::Input::Character('.')) =>
 			match mode
 			{
+			InputMode::LineSelect => {
+				if let Some(opid) = show_menu_modal(&window, &["Simplify", "Compare with clipboard"])
+				{
+					match opid
+					{
+					0 => {
+						crate::manip::simplify(&mut lines[cur_line].expr);
+						},
+					1 =>
+						match clipboard
+						{
+						Clipboard::Line(crate::Line { expr: ref clp_e, .. }) | Clipboard::Expr(ref clp_e) => {
+							let cur_e = crate::manip::normalise(lines[cur_line].expr.clone());
+							let clp_e = crate::manip::normalise(clp_e.clone());
+							log!(window, "TODO: Compare with clipboard (after normalisation) - {} == {}", cur_e, clp_e);
+							},
+						_ => {
+							},
+						},
+					_ => {},
+					}
+				}
+				else
+				{
+					// Cancelled
+				}
+				redraw = Redraw::All;
+				},
 			InputMode::ExprPick | InputMode::ExprSelect => {
 				// TODO: Add "Extract leading" and "Extract trailing"?
 				if let Some(opid) = show_menu_modal(&window, &["Factorise All", "Factorise Leading", "Factorise Trailing", "Distribute Leading"])
@@ -164,6 +192,7 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 					{
 						log!(window, "{} - {:?} - {} => {}", opname, lines[cur_line].sel, lines[cur_line].extract_selection(), e2);
 						lines[cur_line].replace_selection( e2 );
+						//TODO: Run a merge pass on the line after replacement (replacement might have left some mess)
 					}
 					else if opname == ""
 					{

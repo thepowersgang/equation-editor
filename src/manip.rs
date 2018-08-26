@@ -14,6 +14,57 @@ pub fn normalise(e: Expression) -> Expression
 	e
 }
 
+/// Simplifies the expression tree (merging equal precedence sets)
+pub fn simplify(e: &mut Expression)
+{
+	match e
+	{
+	&mut Expression::SubNode(ref mut sn) => {
+		for v in sn.values.iter_mut()
+		{
+			simplify(&mut v.val);
+		}
+
+		let new_len = sn.values.iter().map(|v| {
+			if let Expression::SubNode(ref isn) = v.val
+			{
+				if isn.operation == sn.operation {
+					// TODO: Lift all values into this level
+					return isn.values.len();
+				}
+			}
+			return 1;
+			}).sum();
+		if new_len > sn.values.len()
+		{
+			let mut new_vals = Vec::with_capacity(new_len);
+			for v in sn.values.iter_mut()
+			{
+				let val = ::std::mem::replace(&mut v.val, Expression::Literal(0.));
+				if let Expression::SubNode(isn) = val
+				{
+					if isn.operation == sn.operation {
+						new_vals.extend( isn.values.into_iter().map(|mut v2| { v2.inverse ^= v.inverse; v2 }) );
+					}
+					else {
+						new_vals.push(SubExpression { inverse: v.inverse, val: Expression::SubNode(isn) });
+					}
+				}
+				else
+				{
+					new_vals.push(SubExpression { inverse: v.inverse, val: val })
+				}
+			}
+			sn.values = new_vals;
+		}
+		},
+	&mut Expression::Negative(ref mut n) => {
+		// TODO: Remove double-negatives
+		},
+	_ => {},
+	}
+}
+
 pub fn factorise_trailing(e: Expression) -> Option<Expression>
 {
 	factorise_int(e, Factorise::Trailing)
@@ -230,7 +281,7 @@ fn factorise_int(e: Expression, ty: Factorise) -> Option<Expression>
 					ref e @ _ => Ent::Direct(e),
 					}
 				}
-				if let Some(new_sub_item) = {
+				let new_sub_item = {
 					let item = get_last( sn.values.first().unwrap() );
 					if sn.values.iter().skip(1).all(|v| get_last(v) == item) {
 						Some(match item
@@ -242,7 +293,8 @@ fn factorise_int(e: Expression, ty: Factorise) -> Option<Expression>
 					else {
 						None
 					}
-					}
+					};
+				if let Some(new_sub_item) = new_sub_item
 				{
 					// All equal!
 					// - Remove the trailing from all entries (possibly replacing with 1)
