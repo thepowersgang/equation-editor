@@ -11,7 +11,7 @@ pub enum Op
 	MulDiv,
 	ExpRoot,	// NOTE: Root doesn't actually exist
 }
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub enum Expression
 {
 	/// Negate the inner value
@@ -23,7 +23,7 @@ pub enum Expression
 	/// Variable name
 	Variable(String),
 }
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub struct SubExpression
 {
 	/// Indicates subtract/divide instead of add/multiply
@@ -32,7 +32,7 @@ pub struct SubExpression
 }
 
 /// Representation of a chained set of expressions with the same precedence (e.g. `a + b - c` or `a / b * c`)
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub struct ExprNode
 {
 	pub operation: Op,
@@ -40,6 +40,7 @@ pub struct ExprNode
 }
 #[derive(Debug)]
 pub enum ParseError {
+	Empty,
 	Unexpected(String),
 	BadToken(String),
 }
@@ -85,8 +86,7 @@ impl std::str::FromStr for Expression
 {
 	type Err = ParseError;
 	fn from_str(s: &str) -> Result<Expression, ParseError> {
-		let mut l = Lexer::new(s)?;
-		Self::parse_root(&mut l)
+		Self::parse_from_str_with_comment(s).map(|v| v.0)
 	}
 }
 impl std::fmt::Display for Expression
@@ -216,9 +216,6 @@ impl<'a> Lexer<'a>
 				else {
 					Token::Eof
 				};
-			if let Token::Comment(_) = t {
-				continue ;
-			}
 			if t == Token::Whitespace {
 				continue ;
 			}
@@ -242,6 +239,34 @@ impl<'a> Lexer<'a>
 
 impl Expression
 {
+	pub fn opt_parse_from_str_with_comment(s: &str) -> Result< (Option<Expression>, String), ParseError > {
+		let mut l = Lexer::new(s)?;
+		let rv = if let Token::Comment(_) = l.cur() {
+				None
+			}
+			else {
+				Some( Self::parse_root(&mut l)? )
+			};
+		let c = if let Token::Comment(_) = l.cur() {
+				match l.consume()? { Token::Comment(c) => c.to_owned(), _ => panic!(""), }
+			}
+			else {
+				String::new()
+			};
+		if l.cur() != Token::Eof {
+			return Err( ParseError::Unexpected( format!("{:?}", l.cur()) ) );
+		}
+		Ok( (rv, c,) )
+	}
+	pub fn parse_from_str_with_comment(s: &str) -> Result< (Expression, String), ParseError > {
+		match Self::opt_parse_from_str_with_comment(s)
+		{
+		Err(v) => Err(v),
+		Ok( (None, _) ) => Err(ParseError::Empty),
+		Ok( (Some(e), c) ) => Ok( (e, c) ),
+		}
+	}
+
 	fn parse_root(lexer: &mut Lexer) -> Result<Expression,ParseError> {
 		Self::parse_0(lexer)
 	}

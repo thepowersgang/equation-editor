@@ -133,21 +133,55 @@ pub fn mainloop(lines: &mut Vec<super::Line>)
 		match window.getch()
 		{
 		Some(pc::Input::Character('q')) => break,
-		Some(pc::Input::Character('.')) => {
-			if let Some(opid) = show_menu_modal(&window, &["Extract common factors", "Distribute"])
+		Some(pc::Input::Character('.')) =>
+			match mode
 			{
-				match opid
+			InputMode::ExprPick | InputMode::ExprSelect => {
+				// TODO: Add "Extract leading" and "Extract trailing"?
+				if let Some(opid) = show_menu_modal(&window, &["Factorise All", "Factorise Leading", "Factorise Trailing", "Distribute Leading"])
 				{
-				0 => log!(window, "TODO: Extract common factors"),
-				1 => log!(window, "TODO: Distribute leading multiplication"),
-				_ => log!(window, "BUG: Unknown operation {}", opid),
+					let e = lines[cur_line].extract_selection();
+					let (res, opname) = match opid
+						{
+						0 => {
+							(crate::manip::factorise_all(e), "factorise all",)
+							},
+						1 => {
+							(crate::manip::factorise_leading(e), "factorise leading",)
+							},
+						2 => {
+							(crate::manip::factorise_trailing(e), "factorise leading",)
+							},
+						4 => {
+							//(crate::manip::distribute_leading(e), "distribute leading",)
+							(None, "",)
+							},
+						_ => {
+							(None, "",)
+							}
+						};
+					if let Some(e2) = res
+					{
+						log!(window, "{} - {:?} - {} => {}", opname, lines[cur_line].sel, lines[cur_line].extract_selection(), e2);
+						lines[cur_line].replace_selection( e2 );
+					}
+					else if opname == ""
+					{
+						log!(window, "BUG: Unknown operation {}", opid);
+					}
+					else
+					{
+						log!(window, "Unable to {} in {}", opname, lines[cur_line].extract_selection());
+						statusline = format!("Unable to {}", opname).into();
+					}
 				}
-			}
-			else
-			{
-				log!(window, "No command selected");
-			}
-			redraw = Redraw::All;
+				else
+				{
+					log!(window, "No command selected");
+				}
+				redraw = Redraw::All;
+				},
+			_ => {},
 			},
 
 		Some(pc::Input::KeyEnter) | Some(pc::Input::Character('\n')) =>

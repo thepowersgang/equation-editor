@@ -5,6 +5,7 @@ extern crate structopt;
 mod expression;
 mod curses_ui;
 mod ui_helpers;
+mod manip;
 
 #[derive(StructOpt)]
 #[structopt(name="equation", about="Algebraic equation editor")]
@@ -92,10 +93,10 @@ impl Line {
 		}
 	}
 	fn from_str(s: &str) -> Line {
-		let expr = s.parse().unwrap();
+		let (expr, comment) = expression::Expression::parse_from_str_with_comment(s).unwrap();
 		Line {
 			expr: expr,
-			comment: "".to_owned(),	// TODO
+			comment: comment,
 			sel: crate::ui_helpers::Selection { path: vec![], first: 0, last: 0 },
 		}
 	}
